@@ -91,6 +91,14 @@ Then visit `http://localhost:8000` or the port shown in your terminal.
 3. **Delete a Task**: Hover over a task card and click the trash can icon on the far right.
 4. **Filter by Category**: Click any category in the sidebar to scope your view and track progress for that area.
 5. **Filter by Status**: Use the tabs (`All`, `Active`, `Completed`) above the task list.
+6. **Edit a Task**: Click **Edit**, change its text, priority, category, or due date, and select **Save changes**. Clear the date field to remove the due date. Cancel leaves the task unchanged.
+7. **Undo Deletion**: Click **Undo deletion** after deleting a task or clearing completed tasks. Repeated undo restores earlier deletions during the current page session; reloading clears undo history.
+8. **Plan by Date**: **Today** shows unfinished overdue tasks and tasks due today. **Upcoming** shows later due dates in date order. Both work with category and status filters. Undated tasks remain in **All dates**.
+9. **Back Up Tasks**: **Export JSON** downloads all tasks. **Import JSON** merges a backup into the list, skips identical tasks, and preserves both versions when an ID conflicts. Invalid backups leave tasks unchanged.
+
+An empty saved list stays empty on reload. If browser storage fails, a warning stays visible until a later save succeeds; export a backup before leaving the page to keep unsaved changes.
+
+Run the dependency-free regression checks with `node --test tests/tasks.test.cjs`.
 
 ---
 

@@ -79,9 +79,13 @@ var SEED_TASKS = [
 ];
 
 /* ===== STATE ===== */
+var storageWarning = '';
 var tasks          = loadTasks();
 var activeCategory = 'all';
 var currentFilter  = 'all';
+var activeView     = 'all';
+var editingId      = null;
+var deletionHistory = [];
 var formOpen       = false;
 var sidebarOpen    = false;
 
@@ -91,19 +95,42 @@ var sidebarOpen    = false;
 function futureDateStr(days) {
   var d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function validDate(value) {
+  if (value === '') return true;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  var date = new Date(value + 'T00:00:00Z');
+  return !isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validateTasks(value) {
+  if (!Array.isArray(value)) throw new Error('Expected a task list.');
+  var ids = new Set();
+  return value.map(function (task) {
+    if (!task || typeof task.id !== 'string' || !task.id || ids.has(task.id) ||
+        typeof task.text !== 'string' || !task.text.trim() || typeof task.completed !== 'boolean' ||
+        !['high', 'medium', 'low'].includes(task.priority) ||
+        !CATEGORIES.some(function (cat) { return cat.id !== 'all' && cat.id === task.category; }) ||
+        !validDate(task.dueDate == null ? '' : task.dueDate) ||
+        typeof task.createdAt !== 'number' || !Number.isFinite(task.createdAt)) {
+      throw new Error('Invalid task data.');
+    }
+    ids.add(task.id);
+    return { id: task.id, text: task.text, completed: task.completed, priority: task.priority,
+      category: task.category, dueDate: task.dueDate || '', createdAt: task.createdAt };
+  });
 }
 
 /** Load tasks from localStorage, falling back to seed data */
 function loadTasks() {
   try {
     var raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      var parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
+    if (raw !== null) return validateTasks(JSON.parse(raw));
   } catch (e) {
-    // ignore parse errors
+    storageWarning = 'Saved tasks could not be loaded. Existing browser data has not been changed. Import a backup to recover your tasks.';
+    return [];
   }
   return SEED_TASKS.slice(); // return a fresh copy of seed data
 }
@@ -112,9 +139,24 @@ function loadTasks() {
 function saveTasks() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    storageWarning = '';
   } catch (e) {
-    // ignore storage errors (private mode, quota exceeded, etc.)
+    storageWarning = 'Your browser could not save changes. Keep this page open and export a backup to avoid losing your tasks.';
   }
+  renderStorageWarning();
+}
+
+function renderStorageWarning() {
+  var warning = document.getElementById('storage-warning');
+  warning.textContent = storageWarning;
+  warning.hidden = !storageWarning;
+}
+
+function matchesView(task) {
+  if (activeView === 'all') return true;
+  if (!task.dueDate) return false;
+  var today = futureDateStr(0);
+  return activeView === 'today' ? task.dueDate === today || (!task.completed && task.dueDate < today) : task.dueDate > today;
 }
 
 /** Generate a unique id */
@@ -146,13 +188,19 @@ function getFiltered() {
                     : currentFilter === 'active'
                     ? !t.completed
                     : t.completed;
-    return catMatch && filterMatch;
+    return catMatch && filterMatch && matchesView(t);
+  }).sort(function (a, b) {
+    return activeView === 'all' ? 0 : a.dueDate.localeCompare(b.dueDate);
   });
 }
 
 /* ===== RENDER ===== */
 
 function render() {
+  renderStorageWarning();
+  document.querySelectorAll('.view-btn').forEach(function (button) {
+    button.setAttribute('aria-pressed', button.dataset.view === activeView ? 'true' : 'false');
+  });
   renderDate();
   renderProgress();
   renderCategoryNav();
@@ -228,12 +276,14 @@ function renderCategoryNav() {
 function renderHeader() {
   var catObj    = CATEGORIES.find(function (c) { return c.id === activeCategory; });
   var catLabel  = catObj ? catObj.label : 'All Tasks';
-  document.getElementById('main-title').textContent = catLabel;
+  document.getElementById('main-title').textContent = activeView === 'all' ? catLabel :
+    (activeView === 'today' ? 'Today' : 'Upcoming') + (activeCategory === 'all' ? '' : ' · ' + catLabel);
 
   var filtered  = getFiltered();
   var remaining = filtered.filter(function (t) { return !t.completed; }).length;
   document.getElementById('main-subtitle').textContent =
-    remaining + ' task' + (remaining !== 1 ? 's' : '') + ' remaining';
+    remaining + ' task' + (remaining !== 1 ? 's' : '') + ' remaining' +
+    (activeView === 'today' ? ' · Due today and overdue' : activeView === 'upcoming' ? ' · Due after today' : '');
 }
 
 function renderFilterTabs() {
@@ -244,7 +294,7 @@ function renderFilterTabs() {
   });
 
   var doneCount = tasks.filter(function (t) {
-    return t.completed && (activeCategory === 'all' || t.category === activeCategory);
+    return t.completed && matchesView(t) && (activeCategory === 'all' || t.category === activeCategory);
   }).length;
 
   document.getElementById('btn-clear').style.display = doneCount > 0 ? '' : 'none';
@@ -284,6 +334,8 @@ function buildEmptyState() {
   };
 
   var msg = emptyMessages[currentFilter] || emptyMessages.all;
+  if (activeView !== 'all') msg = { title: 'No matching tasks', sub: activeView === 'today' ?
+    'No overdue or today tasks match these filters.' : 'No tasks due after today match these filters.' };
 
   li.innerHTML =
     '<svg class="empty-state-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -351,7 +403,7 @@ function buildTaskItem(task) {
       '<line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>' +
       '<line x1="3" y1="10" x2="21" y2="10"/>' +
       '</svg>' +
-      (overdue ? 'Overdue · ' : '') + formatDate(task.dueDate);
+      (overdue ? 'Overdue · ' : task.dueDate === futureDateStr(0) ? 'Today · ' : '') + formatDate(task.dueDate);
     meta.appendChild(dateItem);
   }
 
@@ -364,6 +416,13 @@ function buildTaskItem(task) {
   badge.textContent = task.priority;
   badge.setAttribute('aria-label', task.priority + ' priority');
   li.appendChild(badge);
+
+  var editBtn = document.createElement('button');
+  editBtn.className = 'btn-edit';
+  editBtn.textContent = 'Edit';
+  editBtn.setAttribute('aria-label', 'Edit task: ' + task.text);
+  editBtn.addEventListener('click', function () { editTask(task.id); });
+  li.appendChild(editBtn);
 
   /* Delete button */
   var delBtn = document.createElement('button');
@@ -396,6 +455,9 @@ function openForm() {
 }
 
 function closeForm() {
+  editingId = null;
+  document.getElementById('form-title').textContent = 'New task';
+  document.getElementById('btn-add-task').textContent = 'Add Task';
   formOpen = false;
   var form = document.getElementById('add-form');
   form.classList.remove('visible');
@@ -407,10 +469,26 @@ function closeForm() {
   document.getElementById('new-priority').value   = 'medium';
   document.getElementById('new-category').value   = 'personal';
   document.getElementById('btn-add-task').disabled = true;
+  document.getElementById('btn-new-task').focus();
+}
+
+function editTask(id) {
+  var task = tasks.find(function (t) { return t.id === id; });
+  if (!task) return;
+  editingId = id;
+  document.getElementById('form-title').textContent = 'Edit task';
+  document.getElementById('btn-add-task').textContent = 'Save changes';
+  document.getElementById('new-task-text').value = task.text;
+  document.getElementById('new-priority').value = task.priority;
+  document.getElementById('new-category').value = task.category;
+  document.getElementById('new-due').value = task.dueDate || '';
+  document.getElementById('btn-add-task').disabled = false;
+  openForm();
 }
 
 function toggleForm() {
-  if (formOpen) closeForm(); else openForm();
+  if (editingId) { closeForm(); openForm(); }
+  else if (formOpen) closeForm(); else openForm();
 }
 
 function addTask() {
@@ -418,15 +496,23 @@ function addTask() {
   var text   = textEl.value.trim();
   if (!text) return;
 
-  tasks.unshift({
+  var dueInput = document.getElementById('new-due');
+  if (!dueInput.reportValidity() || !validDate(dueInput.value)) return;
+  var changes = {
+    text: text,
+    priority: document.getElementById('new-priority').value,
+    category: document.getElementById('new-category').value,
+    dueDate: dueInput.value,
+  };
+  if (editingId) {
+    tasks = tasks.map(function (task) {
+      return task.id === editingId ? Object.assign({}, task, changes) : task;
+    });
+  } else tasks.unshift(Object.assign({
     id:        uid(),
-    text:      text,
     completed: false,
-    priority:  document.getElementById('new-priority').value,
-    category:  document.getElementById('new-category').value,
-    dueDate:   document.getElementById('new-due').value || futureDateStr(0),
     createdAt: Date.now(),
-  });
+  }, changes));
 
   saveTasks();
   closeForm();
@@ -442,19 +528,81 @@ function toggleTask(id) {
 }
 
 function removeTask(id) {
-  tasks = tasks.filter(function (t) { return t.id !== id; });
+  deleteTasks(function (t) { return t.id === id; });
+}
+
+function clearCompleted() {
+  deleteTasks(function (t) {
+    return t.completed && matchesView(t) && (activeCategory === 'all' || t.category === activeCategory);
+  });
+}
+
+function deleteTasks(predicate) {
+  var removed = [];
+  tasks.forEach(function (task, index) {
+    if (predicate(task)) removed.push({ task: task, index: index });
+  });
+  if (!removed.length) return;
+  deletionHistory.push(removed);
+  tasks = tasks.filter(function (task) { return !predicate(task); });
+  if (removed.some(function (item) { return item.task.id === editingId; })) closeForm();
+  renderUndo();
   saveTasks();
   render();
 }
 
-function clearCompleted() {
-  tasks = tasks.filter(function (t) {
-    // Keep the task if: not completed, OR it belongs to a different category than active
-    return !t.completed ||
-      (activeCategory !== 'all' && t.category !== activeCategory);
-  });
+function renderUndo() {
+  var latest = deletionHistory[deletionHistory.length - 1];
+  document.getElementById('undo-bar').hidden = !latest;
+  document.getElementById('undo-message').textContent = latest ?
+    latest.length + ' task' + (latest.length === 1 ? '' : 's') + ' deleted.' : '';
+}
+
+function undoDelete() {
+  var removed = deletionHistory.pop();
+  if (!removed) return;
+  removed.forEach(function (item) { tasks.splice(Math.min(item.index, tasks.length), 0, item.task); });
+  renderUndo();
   saveTasks();
   render();
+}
+
+function exportTasks() {
+  var blob = new Blob([JSON.stringify({ version: 1, tasks: tasks }, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var link = document.createElement('a');
+  link.href = url;
+  link.download = 'dolist-backup-' + futureDateStr(0) + '.json';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+async function importTasks(file) {
+  if (!file) return;
+  var status = document.getElementById('backup-status');
+  try {
+    var data = JSON.parse(await file.text());
+    if (!Array.isArray(data) && (!data || data.version !== 1)) throw new Error('Unsupported backup.');
+    var imported = validateTasks(Array.isArray(data) ? data : data.tasks);
+    var added = 0;
+    imported.forEach(function (task) {
+      var existing = tasks.find(function (t) { return t.id === task.id; });
+      if (existing && Object.keys(task).every(function (key) { return existing[key] === task[key]; })) return;
+      // Preserve both versions if a backup conflicts with an existing or undoable task.
+      if (existing || deletionHistory.some(function (batch) {
+        return batch.some(function (item) { return item.task.id === task.id; });
+      })) task.id = uid();
+      tasks.push(task);
+      added++;
+    });
+    saveTasks();
+    render();
+    status.textContent = added + ' task' + (added === 1 ? '' : 's') + ' imported. Existing tasks were kept.';
+  } catch (e) {
+    status.textContent = 'Could not import this backup. Choose a valid dolist JSON backup. Your tasks have not changed.';
+  }
 }
 
 /* ===== SIDEBAR (MOBILE) ===== */
@@ -484,6 +632,21 @@ function closeSidebar() {
 /* ===== EVENT WIRING ===== */
 
 // New Task button
+document.getElementById('btn-undo').addEventListener('click', undoDelete);
+document.getElementById('btn-export').addEventListener('click', exportTasks);
+document.getElementById('btn-import').addEventListener('click', function () {
+  document.getElementById('backup-file').click();
+});
+document.getElementById('backup-file').addEventListener('change', async function () {
+  await importTasks(this.files[0]);
+  this.value = '';
+});
+document.querySelectorAll('.view-btn').forEach(function (button) {
+  button.addEventListener('click', function () { activeView = this.dataset.view; render(); });
+});
+window.addEventListener('focus', render);
+setInterval(function () { if (!document.hidden) render(); }, 60000);
+
 document.getElementById('btn-new-task').addEventListener('click', toggleForm);
 
 // Cancel button

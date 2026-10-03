@@ -112,14 +112,25 @@
         </div>
 
         <!-- Add Task Form -->
-        <div id="add-form" class="add-form" aria-hidden="true">
+        <p id="storage-warning" class="notice warning" role="alert" hidden></p>
+        <div class="view-controls" role="group" aria-label="Due date views">
+          <button class="view-btn" data-view="all" aria-pressed="true">All dates</button>
+          <button class="view-btn" data-view="today" aria-pressed="false">Today</button>
+          <button class="view-btn" data-view="upcoming" aria-pressed="false">Upcoming</button>
+        </div>
+        <div id="undo-bar" class="notice" hidden>
+          <span id="undo-message" role="status"></span>
+          <button id="btn-undo" class="btn-cancel">Undo deletion</button>
+        </div>
+        <div id="add-form" class="add-form" aria-hidden="true" role="region" aria-labelledby="form-title">
+          <h2 id="form-title" class="form-title">New task</h2>
           <input
             class="form-input"
             type="text"
             id="new-task-text"
             placeholder="What needs to be done?"
             autocomplete="off"
-            aria-label="New task"
+            aria-label="Task description"
           />
           <div class="form-controls">
             <!-- Priority -->
@@ -164,7 +175,7 @@
                   <line x1="8"  y1="2" x2="8"  y2="6"/>
                   <line x1="3"  y1="10" x2="21" y2="10"/>
                 </svg>
-                Due
+                Due (optional)
               </label>
               <input class="form-date" type="date" id="new-due" aria-label="Due date" />
             </div>
@@ -188,6 +199,15 @@
 
         <!-- Footer count -->
         <p class="task-footer" id="task-footer" style="display: none;"></p>
+
+        <div class="backup-tools">
+          <span>Task backup</span>
+          <button id="btn-export" class="btn-cancel">Export JSON</button>
+          <button id="btn-import" class="btn-cancel">Import JSON</button>
+          <input id="backup-file" type="file" accept=".json,application/json" hidden />
+          <p>Import adds tasks to your list and keeps existing tasks.</p>
+          <p id="backup-status" role="status"></p>
+        </div>
 
       </main>
     </div>
